@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Confirmá tu asistencia — InvitArte</title>
+
+<!-- React + ReactDOM (producción, vía CDN) -->
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+
+<!-- Babel standalone: permite que el navegador transpile el JSX de abajo
+     sin necesidad de un proceso de build (npm, webpack, etc.) -->
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="env,react">
+const { useState, useEffect } = React;
+
+
+// InvitArte brand palette — sage green, taupe gray, beige.
+// Placeholder hex values for named colors; swap for exact Brand Kit hex when available.
+const PALETTE = {
+  beige: "#E8E2D5",
+  beigeDeep: "#D6CCB8",
+  sage: "#9CAF93",
+  sageDark: "#788F6E",
+  sageLight: "#C3D0BC",
+  taupe: "#8B8378",
+  taupeDark: "#5F584D",
+  text: "#3A352D",
+  textMuted: "#8B8378",
+  white: "#FFFFFF",
+  success: "#4A7C59",
+  warning: "#B8762E",
+};
+
+// "The Seasons" is a paid font and not loadable from a public CDN without the
+// licensed file. Cormorant Garamond is used as a visual stand-in — a refined
+// serif with similar editorial, invitation-style proportions. Swap via
+// @font-face once the .otf/.ttf file is available.
+const FONT_IMPORT_URL = "https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Karla:wght@400;500;600;700&display=swap";
+const DISPLAY_FONT = "'Cormorant Garamond', 'Georgia', serif";
+const BODY_FONT = "'Karla', 'Helvetica Neue', sans-serif";
+
+const DIETARY_OPTIONS = ["Vegetariana", "Vegana", "Celíaca", "Pescetariana", "Embarazada"];
+
+// ---------- Field catalog ----------
+// Each field knows its type, whether it's locked (always on), and whether it
+// only appears after another field's value satisfies a condition.
+// Copy in neutral Argentine Spanish (vos, but understandable across LATAM).
+const FIELD_CATALOG = {
+  name: { type: "text", label: "Nombre y apellido", required: true, locked: true },
+  attending: { type: "boolean", label: "Confirmá tu asistencia a la fiesta", required: true, locked: true, trueLabel: "Sí, confirmo", falseLabel: "No voy a poder ir" },
+
+  attendedCeremony: { type: "boolean", label: "¿Asististe a la ceremonia (iglesia/civil)?", trueLabel: "Sí", falseLabel: "No" },
+
+  dietary: { type: "multiselect", label: "¿Seguís alguna dieta especial que debamos saber?", options: DIETARY_OPTIONS, noneLabel: "No, ninguna dieta especial" },
+  allergy: { type: "boolean", label: "¿Tenés alguna alergia o intolerancia?", trueLabel: "Sí", falseLabel: "No" },
+  allergyDetail: { type: "text", label: "Contanos más", placeholder: "Ej: alergia a los frutos secos", conditional: { field: "allergy", equals: true } },
+
+  hasCompanion: { type: "boolean", label: "¿Venís con acompañante?", trueLabel: "Sí", falseLabel: "No" },
+  companionName: { type: "text", label: "Nombre del acompañante", placeholder: "Nombre y apellido", conditional: { field: "hasCompanion", equals: true } },
+  companionDietary: { type: "multiselect", label: "Tu acompañante, ¿sigue alguna dieta especial?", options: DIETARY_OPTIONS, noneLabel: "No, ninguna dieta especial", conditional: { field: "hasCompanion", equals: true } },
+  companionAllergy: { type: "boolean", label: "Tu acompañante, ¿tiene alguna alergia o intolerancia?", trueLabel: "Sí", falseLabel: "No", conditional: { field: "hasCompanion", equals: true } },
+  companionAllergyDetail: { type: "text", label: "Contanos más", placeholder: "Ej: alergia a los frutos secos", conditional: { field: "companionAllergy", equals: true } },
+
+  hasKids: { type: "boolean", label: "¿Venís con niños?", trueLabel: "Sí", falseLabel: "No" },
+  kidsCount: { type: "select", label: "¿Cuántos niños?", options: ["1", "2", "3", "4 o más"], conditional: { field: "hasKids", equals: true } },
+
+  needsTransport: { type: "boolean", label: "¿Necesitás transporte?", trueLabel: "Sí, necesito", falseLabel: "No, voy por mi cuenta" },
+  needsLodging: { type: "boolean", label: "¿Necesitás alojamiento?", trueLabel: "Sí, necesito", falseLabel: "No, ya tengo dónde quedarme" },
+
+  freeQuestion1: { type: "text", label: "¿Cuál es tu canción infaltable para bailar?", placeholder: "Tu respuesta" },
+
+  message: { type: "textarea", label: "Libro de firmas — si querés, dejanos un mensaje" },
+};
+
+// Order matters: this is the visual order fields render in.
+const FIELD_ORDER = [
+  "name", "attending", "attendedCeremony",
+  "dietary", "allergy", "allergyDetail",
+  "hasCompanion", "companionName", "companionDietary", "companionAllergy", "companionAllergyDetail",
+  "hasKids", "kidsCount",
+  "needsTransport", "needsLodging",
+  "freeQuestion1",
+  "message",
+];
+
+const DEFAULT_FIELDS = ["name", "attending", "dietary", "allergy", "allergyDetail", "hasCompanion", "companionName", "companionDietary", "companionAllergy", "companionAllergyDetail", "hasKids", "kidsCount", "needsTransport", "needsLodging", "message"];
+
+const DEFAULT_EVENT = {
+  name: "Valentina & Martín",
+  date: "Sábado 14 de Febrero, 2026",
+  venue: "Salón Palacio, Buenos Aires",
+  deadline: "1 de Enero, 2026",
+  fields: DEFAULT_FIELDS,
+};
+
+function getEventCode() {
+  if (typeof window === "undefined") return "demo";
+  const params = new URLSearchParams(window.location.search);
+  return params.get("evento") || "demo";
+}
+
+function isConditionMet(def, form) {
+  if (!def.conditional) return true;
+  return form[def.conditional.field] === def.conditional.equals;
+}
+
+function initialFormState(activeFields) {
+  const init = {};
+  activeFields.forEach((f) => {
+    const def = FIELD_CATALOG[f];
+    if (def.type === "boolean") init[f] = null;
+    else if (def.type === "multiselect") init[f] = [];
+    else init[f] = "";
+  });
+  return init;
+}
+
+// ===================== GUEST FORM =====================
+function GuestForm({ config, onSubmit, loading }) {
+  const activeFields = FIELD_ORDER.filter((f) => config.fields.includes(f));
+  const [form, setForm] = useState(() => initialFormState(activeFields));
+  const [submitted, setSubmitted] = useState(false);
+  const [error, setError] = useState("");
+
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const toggleMulti = (k, opt) => set(k, form[k].includes(opt) ? form[k].filter((m) => m !== opt) : [...form[k], opt]);
+
+  const visibleFields = activeFields.filter((f) => isConditionMet(FIELD_CATALOG[f], form));
+
+  const handleSubmit = async () => {
+    for (const f of visibleFields) {
+      const def = FIELD_CATALOG[f];
+      if (!def.required) continue;
+      if (def.type === "boolean" && form[f] === null) { setError(`Por favor, completá: ${def.label}`); return; }
+      if (def.type === "text" && !form[f].trim()) { setError(`Por favor, completá: ${def.label}`); return; }
+    }
+    setError("");
+    const ok = await onSubmit(form);
+    if (ok) setSubmitted(true);
+  };
+
+  if (submitted) {
+    const firstName = (form.name || "").split(" ")[0] || "";
+    return (
+      <div style={styles.thankYou}>
+        <div style={styles.thankYouIcon}>{form.attending ? "🥂" : "💌"}</div>
+        <h2 style={styles.thankYouTitle}>{form.attending ? "¡Nos vemos pronto!" : "Gracias por avisarnos"}</h2>
+        <p style={styles.thankYouText}>
+          {form.attending
+            ? `Tu confirmación quedó registrada. ¡Qué alegría que vayas a estar con nosotros${firstName ? ", " + firstName : ""}!`
+            : `Lamentamos que no puedas acompañarnos${firstName ? ", " + firstName : ""}. ¡Te mandamos un abrazo grande!`}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div style={styles.formWrapper}>
+      <div style={styles.formHeader}>
+        <p style={styles.formEyebrow}>Confirmación de asistencia</p>
+        <h1 style={styles.formTitle}>{config.name}</h1>
+        <p style={styles.formDate}>{config.date}</p>
+        <p style={styles.formVenue}>{config.venue}</p>
+        <div style={styles.divider} />
+        <p style={styles.formDeadline}>Confirmá antes del {config.deadline}</p>
+      </div>
+
+      <div style={styles.fields}>
+        {visibleFields.map((f) => {
+          const def = FIELD_CATALOG[f];
+          const isNested = !!def.conditional;
+
+          let control = null;
+          if (def.type === "text") {
+            control = (
+              <div style={isNested ? styles.fieldNested : styles.field} key={f}>
+                <label style={styles.label}>{def.label}{!def.required && <span style={styles.labelNote}> (opcional)</span>}</label>
+                <input style={styles.input} placeholder={def.placeholder} value={form[f]} onChange={(e) => set(f, e.target.value)} />
+              </div>
+            );
+          } else if (def.type === "boolean") {
+            control = (
+              <div style={isNested ? styles.fieldNested : styles.field} key={f}>
+                <label style={styles.label}>{def.label}</label>
+                <div style={styles.radioGroup}>
+                  {[{ v: true, label: def.trueLabel }, { v: false, label: def.falseLabel }].map(({ v, label }) => (
+                    <button key={String(v)} style={{ ...styles.radioBtn, ...(form[f] === v ? styles.radioBtnActive : {}) }} onClick={() => set(f, v)}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            );
+          } else if (def.type === "select") {
+            control = (
+              <div style={isNested ? styles.fieldNested : styles.field} key={f}>
+                <label style={styles.label}>{def.label}</label>
+                <div style={styles.menuGrid}>
+                  {def.options.map((opt) => (
+                    <button key={opt} style={{ ...styles.menuBtn, ...(form[f] === opt ? styles.menuBtnActive : {}) }} onClick={() => set(f, opt)}>
+                      {opt}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            );
+          } else if (def.type === "multiselect") {
+            control = (
+              <div style={isNested ? styles.fieldNested : styles.field} key={f}>
+                <label style={styles.label}>{def.label}</label>
+                <div style={styles.menuGrid}>
+                  {def.options.map((opt) => (
+                    <button key={opt} style={{ ...styles.menuBtn, ...(form[f].includes(opt) ? styles.menuBtnActive : {}) }} onClick={() => toggleMulti(f, opt)}>
+                      {opt}
+                    </button>
+                  ))}
+                  {def.noneLabel && (
+                    <button
+                      style={{ ...styles.menuBtn, gridColumn: "1 / -1", ...(form[f].includes("__none__") ? styles.menuBtnActive : {}) }}
+                      onClick={() => set(f, form[f].includes("__none__") ? [] : ["__none__"])}
+                    >
+                      {def.noneLabel}
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          } else if (def.type === "textarea") {
+            control = (
+              <div style={isNested ? styles.fieldNested : styles.field} key={f}>
+                <label style={styles.label}>{def.label}<span style={styles.labelNote}> (opcional)</span></label>
+                <textarea style={styles.textarea} rows={3} value={form[f]} onChange={(e) => set(f, e.target.value)} />
+              </div>
+            );
+          }
+          return control;
+        })}
+
+        {error && <p style={styles.error}>{error}</p>}
+
+        <button style={{ ...styles.submitBtn, ...(loading ? styles.submitBtnDisabled : {}) }} onClick={handleSubmit} disabled={loading}>
+          {loading ? "Enviando..." : "Enviar"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ===================== MANAGEMENT PANEL =====================
+function Panel({ config, responses, onClear }) {
+  const activeFields = FIELD_ORDER.filter((f) => config.fields.includes(f));
+  const hasAttending = activeFields.includes("attending");
+
+  const attending = hasAttending ? responses.filter((r) => r.attending) : responses;
+  const notAttending = hasAttending ? responses.filter((r) => !r.attending) : [];
+
+  // anyone (guest or companion) with a dietary need or allergy, for the kitchen-facing alert list
+  const dietaryAlerts = [];
+  attending.forEach((r) => {
+    const guestDiet = (r.dietary || []).filter((d) => d !== "__none__");
+    if (guestDiet.length > 0 || r.allergy) {
+      dietaryAlerts.push({ id: r.id + "-self", name: r.name, diet: guestDiet, allergyDetail: r.allergyDetail });
+    }
+    if (r.hasCompanion && r.companionName) {
+      const compDiet = (r.companionDietary || []).filter((d) => d !== "__none__");
+      if (compDiet.length > 0 || r.companionAllergy) {
+        dietaryAlerts.push({ id: r.id + "-comp", name: r.companionName, diet: compDiet, allergyDetail: r.companionAllergyDetail });
+      }
+    }
+  });
+
+  const totalHeads = attending.reduce((s, r) => s + 1 + (r.hasCompanion ? 1 : 0) + (r.hasKids ? (parseInt(r.kidsCount) || 1) : 0), 0);
+  const totalCompanions = attending.filter((r) => r.hasCompanion).length;
+  const totalKids = attending.reduce((s, r) => s + (r.hasKids ? (parseInt(r.kidsCount) || 1) : 0), 0);
+  const transportNeeded = attending.filter((r) => r.needsTransport).length;
+  const lodgingNeeded = attending.filter((r) => r.needsLodging).length;
+  const ceremonyAttendees = responses.filter((r) => r.attendedCeremony).length;
+
+  const exportCSV = () => {
+    const headers = activeFields.map((f) => FIELD_CATALOG[f].label);
+    const rows = [
+      [...headers, "Fecha"],
+      ...responses.map((r) => [
+        ...activeFields.map((f) => {
+          const v = r[f];
+          if (Array.isArray(v)) return v.filter((x) => x !== "__none__").join(" / ");
+          if (typeof v === "boolean") return v ? "Sí" : "No";
+          return v ?? "";
+        }),
+        new Date(r.timestamp).toLocaleString("es-AR"),
+      ]),
+    ];
+    const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `confirmaciones-${config.name.replace(/\s+/g, "-")}.csv`; a.click();
+  };
+
+  return (
+    <div style={styles.panel}>
+      <div style={styles.panelHeader}>
+        <div>
+          <p style={styles.panelEyebrow}>Panel de Gestión InvitArte</p>
+          <h2 style={styles.panelTitle}>{config.name}</h2>
+          <p style={styles.panelSub}>{config.date} · {config.venue}</p>
+        </div>
+        <button style={styles.exportBtn} onClick={exportCSV}>↓ Exportar CSV</button>
+      </div>
+
+      <div style={styles.statsRow}>
+        {hasAttending ? (
+          <>
+            <div style={styles.statCard}><p style={styles.statVal}>{attending.length}</p><p style={styles.statLabel}>Confirmados</p><p style={styles.statSub}>{totalHeads} personas en total</p></div>
+            <div style={styles.statCard}><p style={styles.statVal}>{notAttending.length}</p><p style={styles.statLabel}>No asisten</p></div>
+            <div style={styles.statCard}><p style={styles.statVal}>{responses.length}</p><p style={styles.statLabel}>Total respuestas</p></div>
+          </>
+        ) : (
+          <div style={styles.statCard}><p style={styles.statVal}>{responses.length}</p><p style={styles.statLabel}>Total respuestas</p></div>
+        )}
+      </div>
+
+      {(totalCompanions > 0 || totalKids > 0 || transportNeeded > 0 || lodgingNeeded > 0 || ceremonyAttendees > 0) && (
+        <div style={styles.statsRow}>
+          {config.fields.includes("hasCompanion") && <div style={styles.statCardSm}><p style={styles.statValSm}>{totalCompanions}</p><p style={styles.statLabel}>Con acompañante</p></div>}
+          {config.fields.includes("hasKids") && <div style={styles.statCardSm}><p style={styles.statValSm}>{totalKids}</p><p style={styles.statLabel}>Niños en total</p></div>}
+          {config.fields.includes("needsTransport") && <div style={styles.statCardSm}><p style={styles.statValSm}>{transportNeeded}</p><p style={styles.statLabel}>Necesitan transporte</p></div>}
+          {config.fields.includes("needsLodging") && <div style={styles.statCardSm}><p style={styles.statValSm}>{lodgingNeeded}</p><p style={styles.statLabel}>Necesitan alojamiento</p></div>}
+          {config.fields.includes("attendedCeremony") && <div style={styles.statCardSm}><p style={styles.statValSm}>{ceremonyAttendees}</p><p style={styles.statLabel}>Fueron a la ceremonia</p></div>}
+        </div>
+      )}
+
+      {dietaryAlerts.length > 0 && (
+        <div style={styles.section}>
+          <h3 style={styles.sectionTitle}>⚠ Dietas y alergias a tener en cuenta</h3>
+          <div style={styles.alertList}>
+            {dietaryAlerts.map((a) => (
+              <div key={a.id} style={styles.alertRow}>
+                <span style={styles.alertName}>{a.name}</span>
+                {a.diet.length > 0 && <span style={styles.alertTags}>{a.diet.join(" · ")}</span>}
+                {a.allergyDetail && <span style={styles.alertDetail}>"{a.allergyDetail}"</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div style={styles.section}>
+        <h3 style={styles.sectionTitle}>Respuestas ({responses.length})</h3>
+        {responses.length === 0 ? (
+          <p style={styles.empty}>Todavía no hay confirmaciones. Compartí el link con tus invitados.</p>
+        ) : (
+          <div style={styles.responseList}>
+            {[...responses].reverse().map((r) => (
+              <div key={r.id} style={styles.responseCard}>
+                <div style={styles.responseTop}>
+                  <span style={styles.responseName}>{r.name}</span>
+                  {hasAttending && (
+                    <span style={{ ...styles.responseBadge, ...(r.attending ? styles.badgeYes : styles.badgeNo) }}>
+                      {r.attending ? "Asiste" : "No asiste"}
+                    </span>
+                  )}
+                </div>
+                {r.hasCompanion && r.companionName && <p style={styles.responseDetail}>+ Acompañante: {r.companionName}</p>}
+                {r.hasKids && <p style={styles.responseDetail}>Con {r.kidsCount || "1"} niño{r.kidsCount === "1" ? "" : "s"}</p>}
+                {r.needsTransport === true && <p style={styles.responseDetail}>Necesita transporte</p>}
+                {r.needsLodging === true && <p style={styles.responseDetail}>Necesita alojamiento</p>}
+                {r.message && <p style={styles.responseMessage}>"{r.message}"</p>}
+                <p style={styles.responseTime}>{new Date(r.timestamp).toLocaleString("es-AR")}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {responses.length > 0 && <button style={styles.clearBtn} onClick={onClear}>Limpiar datos de prueba</button>}
+    </div>
+  );
+}
+
+// ===================== CONFIG / BUILDER VIEW =====================
+function ConfigEditor({ config, onSave, backendUrl, onSaveBackendUrl, backendError }) {
+  const [draft, setDraft] = useState(config);
+  const [saved, setSaved] = useState(false);
+  const [backendDraft, setBackendDraft] = useState(backendUrl || "");
+  const [backendSaved, setBackendSaved] = useState(false);
+
+  const toggleField = (key) => {
+    setSaved(false);
+    setDraft((d) => {
+      const isOn = d.fields.includes(key);
+      let fields = isOn ? d.fields.filter((f) => f !== key) : [...d.fields, key];
+      // turning off a parent also turns off anything conditional on it
+      if (isOn) {
+        const dependents = Object.entries(FIELD_CATALOG).filter(([, def]) => def.conditional?.field === key).map(([k]) => k);
+        fields = fields.filter((f) => !dependents.includes(f));
+      }
+      return { ...d, fields };
+    });
+  };
+
+  const setMeta = (k, v) => { setSaved(false); setDraft((d) => ({ ...d, [k]: v })); };
+  const save = async () => { await onSave(draft); setSaved(true); };
+
+  // group fields visually: top-level questions, with their conditional children indented
+  const topLevel = FIELD_ORDER.filter((f) => !FIELD_CATALOG[f].conditional);
+
+  return (
+    <div style={styles.panel}>
+      <div style={styles.section}>
+        <h3 style={styles.sectionTitle}>Conexión con Google Sheets</h3>
+        <p style={{ ...styles.empty, padding: "0 0 14px", textAlign: "left" }}>
+          Pegá acá la URL del backend (Apps Script) de la Google Sheet de este evento. La conseguís siguiendo las instrucciones de instalación, en el paso "Implementar → Nueva implementación".
+        </p>
+        {backendError && (
+          <div style={styles.alertRow}>
+            <span style={styles.alertName}>Error de conexión:</span>
+            <span style={styles.alertTags}>{backendError}</span>
+          </div>
+        )}
+        <div style={styles.field}>
+          <label style={styles.label}>URL del backend (termina en /exec)</label>
+          <input
+            style={styles.input}
+            placeholder="https://script.google.com/macros/s/AKfycb.../exec"
+            value={backendDraft}
+            onChange={(e) => { setBackendDraft(e.target.value); setBackendSaved(false); }}
+          />
+        </div>
+        <button
+          style={{ ...styles.exportBtn, marginTop: 12 }}
+          onClick={() => { onSaveBackendUrl(backendDraft.trim()); setBackendSaved(true); }}
+        >
+          {backendSaved ? "✓ Conectado" : "Conectar"}
+        </button>
+      </div>
+
+      <div style={styles.section}>
+        <h3 style={styles.sectionTitle}>Datos del evento</h3>
+        <div style={styles.fields}>
+          {[
+            { k: "name", label: "Nombre del evento" },
+            { k: "date", label: "Fecha" },
+            { k: "venue", label: "Lugar" },
+            { k: "deadline", label: "Fecha límite de confirmación" },
+          ].map(({ k, label }) => (
+            <div style={styles.field} key={k}>
+              <label style={styles.label}>{label}</label>
+              <input style={styles.input} value={draft[k]} onChange={(e) => setMeta(k, e.target.value)} />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={styles.section}>
+        <h3 style={styles.sectionTitle}>Preguntas del formulario</h3>
+        <p style={{ ...styles.empty, padding: "0 0 14px", textAlign: "left" }}>
+          Tildá las preguntas para este evento. Las que tienen sub-preguntas (con sangría) solo aparecen para el invitado si la pregunta principal está activa y respondida que sí.
+        </p>
+        <div style={styles.checkList}>
+          {topLevel.map((key) => {
+            const def = FIELD_CATALOG[key];
+            const children = FIELD_ORDER.filter((f) => FIELD_CATALOG[f].conditional?.field === key);
+            return (
+              <div key={key}>
+                <label style={styles.checkRow}>
+                  <input type="checkbox" checked={draft.fields.includes(key)} disabled={def.locked} onChange={() => toggleField(key)} style={styles.checkbox} />
+                  <span style={{ ...styles.checkLabel, ...(def.locked ? { color: PALETTE.textMuted } : {}) }}>
+                    {def.label}{def.locked && <span style={styles.labelNote}> (siempre incluida)</span>}
+                  </span>
+                </label>
+                {children.map((childKey) => {
+                  const childDef = FIELD_CATALOG[childKey];
+                  const parentOn = draft.fields.includes(key);
+                  return (
+                    <label key={childKey} style={{ ...styles.checkRow, ...styles.checkRowChild, ...(parentOn ? {} : { opacity: 0.4 }) }}>
+                      <input type="checkbox" checked={draft.fields.includes(childKey)} disabled={!parentOn} onChange={() => toggleField(childKey)} style={styles.checkbox} />
+                      <span style={styles.checkLabel}>{childDef.label}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <button style={styles.submitBtn} onClick={save}>{saved ? "✓ Guardado" : "Guardar configuración"}</button>
+      {saved && <p style={{ ...styles.formDeadline, textAlign: "center", marginTop: 10 }}>Los cambios ya están activos en el link del invitado.</p>}
+    </div>
+  );
+}
+
+// ===================== APP =====================
+// Reemplazo de window.storage: este componente ahora vive fuera del chat
+// (subido a Netlify), así que las respuestas y la configuración se guardan
+// en una Google Sheet a través de un Google Apps Script.
+//
+// IMPORTANTE — recomendación de uso: la URL del backend (única por evento)
+// SIEMPRE debería ir como parámetro en el link que se manda, ej:
+//   tudominio.com/rsvp?evento=valentina-martin&backend=https://script.google.com/.../exec
+// Esto evita que el sistema "se desconfigure" si alguien entra desde otro
+// dispositivo o borra el caché del navegador — el link en sí ya trae todo
+// lo necesario para funcionar, sin depender de localStorage.
+// localStorage se usa solo como conveniencia adicional (para no tener que
+// repetir el parámetro &backend= cada vez que la clienta vuelve a entrar
+// desde el mismo dispositivo), nunca como única fuente de la URL.
+function getBackendUrl() {
+  if (typeof window === "undefined") return "";
+  const params = new URLSearchParams(window.location.search);
+  const fromUrl = params.get("backend");
+  if (fromUrl) {
+    localStorage.setItem(`invitarte-backend-${getEventCode()}`, fromUrl);
+    return fromUrl;
+  }
+  return localStorage.getItem(`invitarte-backend-${getEventCode()}`) || "";
+}
+
+function setBackendUrl(url) {
+  localStorage.setItem(`invitarte-backend-${getEventCode()}`, url);
+}
+
+async function backendGet(action) {
+  const url = getBackendUrl();
+  if (!url) throw new Error("Falta configurar la URL del backend");
+  const res = await fetch(`${url}?action=${action}`);
+  const json = await res.json();
+  if (json.error) throw new Error(json.error);
+  return json;
+}
+
+async function backendPost(action, data) {
+  const url = getBackendUrl();
+  if (!url) throw new Error("Falta configurar la URL del backend");
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain" }, // evita preflight CORS con Apps Script
+    body: JSON.stringify({ action, data }),
+  });
+  const json = await res.json();
+  if (json.error) throw new Error(json.error);
+  return json;
+}
+
+function App() {
+  const eventCode = getEventCode();
+  const [view, setView] = useState("guest");
+  const [config, setConfig] = useState(DEFAULT_EVENT);
+  const [responses, setResponses] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [ready, setReady] = useState(false);
+  const [backendUrl, setBackendUrlState] = useState(getBackendUrl());
+  const [backendError, setBackendError] = useState("");
+
+  useEffect(() => { loadAll(); }, []);
+
+  const loadAll = async () => {
+    setBackendError("");
+    if (!getBackendUrl()) { setReady(true); return; }
+    try {
+      const c = await backendGet("getConfig");
+      if (c && Object.keys(c).length > 0) setConfig({ ...DEFAULT_EVENT, ...c });
+    } catch (err) { setBackendError(err.message); }
+    try {
+      const r = await backendGet("getResponses");
+      if (Array.isArray(r)) setResponses(r);
+    } catch (err) { setBackendError(err.message); }
+    setReady(true);
+  };
+
+  const saveConfig = async (newConfig) => {
+    setConfig(newConfig);
+    try { await backendPost("saveConfig", newConfig); } catch (err) { setBackendError(err.message); }
+  };
+
+  const handleSubmit = async (form) => {
+    setLoading(true);
+    try {
+      await backendPost("saveResponse", form);
+      const r = await backendGet("getResponses");
+      if (Array.isArray(r)) setResponses(r);
+    } catch (err) {
+      setBackendError(err.message);
+      setLoading(false);
+      return false;
+    }
+    setLoading(false);
+    return true;
+  };
+
+  const handleClear = async () => {
+    if (!window.confirm("¿Segura que querés borrar todas las respuestas de este evento?")) return;
+    try { await backendPost("clearResponses", {}); setResponses([]); } catch (err) { setBackendError(err.message); }
+  };
+
+  const handleSaveBackendUrl = (url) => {
+    setBackendUrl(url);
+    setBackendUrlState(url);
+    loadAll();
+  };
+
+  return (
+    <div style={styles.root}>
+      <style>{`@import url('${FONT_IMPORT_URL}');`}</style>
+      <div style={styles.nav}>
+        <button style={{ ...styles.navBtn, ...(view === "guest" ? styles.navBtnActive : {}) }} onClick={() => setView("guest")}>Invitado</button>
+        <button style={{ ...styles.navBtn, ...(view === "panel" ? styles.navBtnActive : {}) }} onClick={() => setView("panel")}>
+          Gestión {responses.length > 0 && <span style={styles.navBadge}>{responses.length}</span>}
+        </button>
+        <button style={{ ...styles.navBtn, ...(view === "config" ? styles.navBtnActive : {}) }} onClick={() => setView("config")}>Configurar</button>
+      </div>
+      <div style={styles.codeStrip}>código de evento: <strong>{eventCode}</strong> · cambialo agregando <code>?evento=nombre-clienta</code> al link</div>
+
+      {!ready ? (
+        <div style={styles.loading}>Cargando...</div>
+      ) : !backendUrl && view === "guest" ? (
+        <div style={styles.thankYou}>
+          <div style={styles.thankYouIcon}>⚠️</div>
+          <h2 style={styles.thankYouTitle}>Este link todavía no está activo</h2>
+          <p style={styles.thankYouText}>
+            Parece que falta terminar de configurar esta invitación. Por favor, avisale a quien te mandó este link — todavía no podemos guardar tu confirmación.
+          </p>
+        </div>
+      ) : view === "guest" ? (
+        <GuestForm config={config} onSubmit={handleSubmit} loading={loading} />
+      ) : view === "panel" ? (
+        <Panel config={config} responses={responses} onClear={handleClear} />
+      ) : (
+        <ConfigEditor config={config} onSave={saveConfig} backendUrl={backendUrl} onSaveBackendUrl={handleSaveBackendUrl} backendError={backendError} />
+      )}
+    </div>
+  );
+}
+
+const styles = {
+  root: { fontFamily: DISPLAY_FONT, background: PALETTE.beige, minHeight: "100vh", color: PALETTE.text },
+  nav: { display: "flex", justifyContent: "center", gap: 8, padding: "16px 20px 10px", background: PALETTE.taupeDark, position: "sticky", top: 0, zIndex: 10, flexWrap: "wrap" },
+  navBtn: { padding: "7px 18px", border: "1px solid rgba(255,255,255,0.3)", borderRadius: 40, background: "transparent", color: "rgba(255,255,255,0.7)", cursor: "pointer", fontSize: 13, fontFamily: BODY_FONT, letterSpacing: "0.03em", display: "flex", alignItems: "center", gap: 6 },
+  navBtnActive: { background: PALETTE.sageDark, color: PALETTE.white, border: "1px solid transparent" },
+  navBadge: { background: PALETTE.beige, color: PALETTE.sage, borderRadius: 20, padding: "1px 7px", fontSize: 11, fontFamily: BODY_FONT, fontWeight: 700 },
+  codeStrip: { textAlign: "center", fontSize: 11, fontFamily: BODY_FONT, color: PALETTE.textMuted, background: PALETTE.beige, padding: "6px 12px" },
+  loading: { textAlign: "center", padding: 60, color: PALETTE.textMuted },
+
+  formWrapper: { maxWidth: 500, margin: "0 auto", padding: "40px 24px 60px" },
+  formHeader: { textAlign: "center", marginBottom: 40 },
+  formEyebrow: { fontSize: 11, letterSpacing: "0.18em", textTransform: "uppercase", color: PALETTE.sageDark, margin: "0 0 16px", fontFamily: BODY_FONT },
+  formTitle: { fontSize: 34, fontWeight: 400, margin: "0 0 8px", color: PALETTE.taupeDark, lineHeight: 1.2, letterSpacing: "-0.01em" },
+  formDate: { fontSize: 15, color: PALETTE.text, margin: "0 0 4px", fontFamily: BODY_FONT },
+  formVenue: { fontSize: 13, color: PALETTE.textMuted, margin: 0, fontFamily: BODY_FONT },
+  divider: { width: 40, height: 1, background: PALETTE.beigeDeep, margin: "20px auto" },
+  formDeadline: { fontSize: 12, color: PALETTE.textMuted, fontFamily: BODY_FONT, margin: 0, letterSpacing: "0.02em" },
+  fields: { display: "flex", flexDirection: "column", gap: 22 },
+  field: { display: "flex", flexDirection: "column", gap: 8 },
+  fieldNested: { display: "flex", flexDirection: "column", gap: 8, marginLeft: 16, paddingLeft: 14, borderLeft: `2px solid ${PALETTE.beigeDeep}` },
+  label: { fontSize: 13, fontFamily: BODY_FONT, color: PALETTE.text, fontWeight: 600, letterSpacing: "0.01em" },
+  labelNote: { fontWeight: 400, color: PALETTE.textMuted },
+  input: { padding: "12px 14px", border: `1px solid ${PALETTE.beigeDeep}`, borderRadius: 8, background: PALETTE.white, fontSize: 15, fontFamily: BODY_FONT, color: PALETTE.text, outline: "none" },
+  textarea: { padding: "12px 14px", border: `1px solid ${PALETTE.beigeDeep}`, borderRadius: 8, background: PALETTE.white, fontSize: 14, fontFamily: BODY_FONT, color: PALETTE.text, resize: "vertical", outline: "none" },
+  radioGroup: { display: "flex", gap: 10, flexWrap: "wrap" },
+  radioBtn: { padding: "10px 20px", border: `1px solid ${PALETTE.beigeDeep}`, borderRadius: 40, background: PALETTE.white, fontSize: 14, fontFamily: BODY_FONT, color: PALETTE.textMuted, cursor: "pointer" },
+  radioBtnActive: { background: PALETTE.sage, color: PALETTE.white, border: `1px solid ${PALETTE.sage}` },
+  menuGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 },
+  menuBtn: { padding: "10px 14px", border: `1px solid ${PALETTE.beigeDeep}`, borderRadius: 8, background: PALETTE.white, fontSize: 13, fontFamily: BODY_FONT, color: PALETTE.textMuted, cursor: "pointer", textAlign: "left" },
+  menuBtnActive: { background: PALETTE.beige, border: `1px solid ${PALETTE.sage}`, color: PALETTE.taupeDark, fontWeight: 600 },
+  error: { fontSize: 13, color: "#C0392B", fontFamily: BODY_FONT, margin: 0 },
+  submitBtn: { padding: "15px", background: PALETTE.sage, color: PALETTE.white, border: "none", borderRadius: 10, fontSize: 15, fontFamily: BODY_FONT, fontWeight: 600, cursor: "pointer", letterSpacing: "0.02em" },
+  submitBtnDisabled: { background: PALETTE.beigeDeep, cursor: "not-allowed" },
+  thankYou: { maxWidth: 400, margin: "80px auto", textAlign: "center", padding: "0 24px" },
+  thankYouIcon: { fontSize: 48, marginBottom: 20 },
+  thankYouTitle: { fontSize: 28, fontWeight: 400, color: PALETTE.taupeDark, margin: "0 0 12px" },
+  thankYouText: { fontSize: 15, fontFamily: BODY_FONT, color: PALETTE.textMuted, lineHeight: 1.6, margin: 0 },
+
+  panel: { maxWidth: 700, margin: "0 auto", padding: "32px 24px 60px" },
+  panelHeader: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24, flexWrap: "wrap", gap: 12 },
+  panelEyebrow: { fontSize: 11, letterSpacing: "0.16em", textTransform: "uppercase", color: PALETTE.sageDark, fontFamily: BODY_FONT, margin: "0 0 6px" },
+  panelTitle: { fontSize: 26, fontWeight: 400, color: PALETTE.taupeDark, margin: "0 0 4px" },
+  panelSub: { fontSize: 13, fontFamily: BODY_FONT, color: PALETTE.textMuted, margin: 0 },
+  exportBtn: { padding: "8px 16px", border: `1px solid ${PALETTE.beigeDeep}`, borderRadius: 8, background: PALETTE.white, fontSize: 13, fontFamily: BODY_FONT, color: PALETTE.sage, cursor: "pointer", fontWeight: 600 },
+  statsRow: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12, marginBottom: 14 },
+  statCard: { background: PALETTE.white, border: `1px solid ${PALETTE.beige}`, borderRadius: 12, padding: "16px", textAlign: "center" },
+  statCardSm: { background: PALETTE.white, border: `1px solid ${PALETTE.beige}`, borderRadius: 10, padding: "10px", textAlign: "center" },
+  statVal: { fontSize: 36, fontWeight: 400, color: PALETTE.sage, margin: "0 0 2px", lineHeight: 1 },
+  statValSm: { fontSize: 22, fontWeight: 400, color: PALETTE.sage, margin: "0 0 2px", lineHeight: 1 },
+  statLabel: { fontSize: 12, fontFamily: BODY_FONT, fontWeight: 700, color: PALETTE.text, margin: "0 0 2px", letterSpacing: "0.03em" },
+  statSub: { fontSize: 11, fontFamily: BODY_FONT, color: PALETTE.textMuted, margin: 0 },
+  section: { marginBottom: 28, marginTop: 14 },
+  sectionTitle: { fontSize: 13, fontFamily: BODY_FONT, fontWeight: 700, color: PALETTE.textMuted, letterSpacing: "0.1em", textTransform: "uppercase", margin: "0 0 14px", paddingBottom: 8, borderBottom: `1px solid ${PALETTE.beige}` },
+  alertList: { display: "flex", flexDirection: "column", gap: 8 },
+  alertRow: { background: "#FBF1E4", border: `1px solid ${PALETTE.warning}33`, borderRadius: 8, padding: "10px 14px", fontFamily: BODY_FONT, fontSize: 13, display: "flex", flexDirection: "column", gap: 2 },
+  alertName: { fontWeight: 700, color: PALETTE.text },
+  alertTags: { color: PALETTE.warning, fontWeight: 600 },
+  alertDetail: { color: PALETTE.textMuted, fontStyle: "italic" },
+  responseList: { display: "flex", flexDirection: "column", gap: 10 },
+  responseCard: { background: PALETTE.white, border: `1px solid ${PALETTE.beige}`, borderRadius: 10, padding: "14px 16px" },
+  responseTop: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 },
+  responseName: { fontSize: 15, fontWeight: 400, color: PALETTE.text },
+  responseBadge: { fontSize: 11, fontFamily: BODY_FONT, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", padding: "3px 10px", borderRadius: 20 },
+  badgeYes: { background: "#E8F5EC", color: PALETTE.success },
+  badgeNo: { background: PALETTE.beige, color: PALETTE.textMuted },
+  responseDetail: { fontSize: 12, fontFamily: BODY_FONT, color: PALETTE.textMuted, margin: "4px 0 0" },
+  responseMessage: { fontSize: 13, fontFamily: BODY_FONT, color: PALETTE.text, fontStyle: "italic", margin: "6px 0 0" },
+  responseTime: { fontSize: 11, fontFamily: BODY_FONT, color: PALETTE.beigeDeep, margin: "6px 0 0" },
+  empty: { fontSize: 14, fontFamily: BODY_FONT, color: PALETTE.textMuted, textAlign: "center", padding: "30px 0" },
+  clearBtn: { padding: "8px 16px", border: `1px solid ${PALETTE.beigeDeep}`, borderRadius: 8, background: "transparent", fontSize: 12, fontFamily: BODY_FONT, color: PALETTE.textMuted, cursor: "pointer", display: "block", margin: "0 auto" },
+
+  checkList: { display: "flex", flexDirection: "column", gap: 2 },
+  checkRow: { display: "flex", alignItems: "flex-start", gap: 10, padding: "9px 4px", borderBottom: `1px solid ${PALETTE.beige}`, cursor: "pointer" },
+  checkRowChild: { borderBottom: "none", paddingLeft: 28, background: PALETTE.beige + "55" },
+  checkbox: { width: 17, height: 17, marginTop: 1, accentColor: PALETTE.sage, cursor: "pointer" },
+  checkLabel: { fontSize: 14, fontFamily: BODY_FONT, color: PALETTE.text },
+};
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<App />);
+</script>
+</body>
+</html>
